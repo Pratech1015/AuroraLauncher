@@ -1,0 +1,10 @@
+# Build artifacts
+/target/
+/build/
+*.jar
+*.war
+*.zip
+*.class
+
+# Local launcher data (never in repo)
+.auroralauncher/
