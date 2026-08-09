@@ -565,13 +565,18 @@ public final class AuroraEngine {
     // -- Discord presence helpers --
 
     /** Connect (if needed) and publish a default AuroraLauncher presence. */
-    private boolean setDefaultPresence(String details, String state) {
+    boolean setDefaultPresence(String details, String state) {
         if (!discord.isConnected() && !discord.connect()) return false;
         return discord.setActivity(details, state, DISCORD_ASSET_KEY, "AuroraLauncher");
     }
 
-    private boolean setDefaultPresence(String state) {
+    boolean setDefaultPresence(String state) {
         return setDefaultPresence("AuroraLauncher", state);
+    }
+
+    /** Drop the active rich presence (best-effort). */
+    boolean clearDiscordPresence() {
+        return discord.clearActivity();
     }
 
     int runDiscord(List<String> argv) {

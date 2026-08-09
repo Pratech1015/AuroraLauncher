@@ -76,7 +76,15 @@ public final class AuroraTui {
                     case 'l' -> { handleLaunch(); continue; }
                     case 'r' -> { refreshEntries(); continue; }
                     case 'a' -> { engine.runAuth(new ArrayList<>()); continue; }
-                    case 'd' -> { discordOn = !discordOn; status = "discord: " + (discordOn ? "on" : "off"); continue; }
+                    case 'd' -> { discordOn = !discordOn;
+                        if (discordOn) {
+                            status = engine.setDefaultPresence("AuroraLauncher", "idle - in TUI")
+                                    ? "discord: on" : "discord: off (not running)";
+                        } else {
+                            engine.clearDiscordPresence();
+                            status = "discord: off";
+                        }
+                        continue; }
                     case 'x' -> { showInstalled = !showInstalled; continue; }
                     case '/' -> { doFilter(screen); continue; }
                     default -> {}
