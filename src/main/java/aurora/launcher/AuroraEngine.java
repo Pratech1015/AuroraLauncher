@@ -94,13 +94,14 @@ public final class AuroraEngine {
             case "auth" -> { return runAuth(argv); }
             case "crack" -> { return runCrack(argv); }
             case "discord" -> { return runDiscord(argv); }
+            case "tui" -> { new AuroraTui(this).run(); return 0; }
             default -> { System.err.println("Unknown command: " + cmd); printHelp(); return 1; }
         }
     }
 
     private static boolean isKnownCommand(String cmd) {
         return Set.of("list", "versions", "install", "launch", "where", "help", "update",
-                "auth", "crack", "discord").contains(cmd);
+                "auth", "crack", "discord", "tui").contains(cmd);
     }
 
     private static String[] extractJavaArgs(List<String> argv) {
@@ -145,7 +146,7 @@ public final class AuroraEngine {
         }
     }
 
-    private boolean installVersion(String version) throws Exception {
+    boolean installVersion(String version) throws Exception {
         printer.section("Installing " + version);
         var result = installer.install(version);
         if (result.success) {
@@ -156,7 +157,7 @@ public final class AuroraEngine {
         return false;
     }
 
-    private int launchVersion(String version, String[] javaArgs) throws Exception {
+    int launchVersion(String version, String[] javaArgs) throws Exception {
         printer.section("Launching Minecraft " + version);
         var mc = installer.prepare(version);
         if (mc == null) {
@@ -413,6 +414,7 @@ public final class AuroraEngine {
             System.out.println("  6) Manage accounts (auth/cracked)");
             System.out.println("  7) Crack a client jar (strip signatures)");
             System.out.println("  8) Discord rich presence");
+            System.out.println("  9) Launch full-screen TUI");
             System.out.println("  0) Quit");
             System.out.print("> ");
             String line = sc.hasNextLine() ? sc.nextLine() : "";
@@ -427,8 +429,9 @@ public final class AuroraEngine {
                     case '6' -> runAuth(new ArrayList<>());
                     case '7' -> runCrack(new ArrayList<>());
                     case '8' -> runDiscord(new ArrayList<>());
+                    case '9' -> { new AuroraTui(this).run(); }
                     case '0' -> { System.out.println("Bye."); return 0; }
-                    default -> System.out.println("  pick 0-8");
+                    default -> System.out.println("  pick 0-9");
                 }
             } catch (Exception e) {
                 System.err.println("  error: " + e.getMessage());
@@ -497,11 +500,12 @@ public final class AuroraEngine {
         System.out.println("  aurora auth crack <name>      set a cracked (non-premium) profile");
         System.out.println("  aurora crack <ver>            strip signatures from a client jar");
         System.out.println("  aurora discord [details]      set Discord rich presence");
+        System.out.println("  aurora tui                     launch full-screen terminal UI");
         System.out.println("  aurora update                 check for launcher updates");
     }
 
     // ---- auth ----
-    private int runAuth(List<String> argv) {
+    int runAuth(List<String> argv) {
         if (argv.isEmpty() || "list".equalsIgnoreCase(argv.get(0))) {
             System.out.println("Accounts:");
             for (Auth.Account a : auth.all()) {
@@ -536,7 +540,7 @@ public final class AuroraEngine {
     }
 
     // ---- crack ----
-    private int runCrack(List<String> argv) {
+    int runCrack(List<String> argv) {
         String ver = argv.isEmpty() ? promptVersion() : argv.remove(0);
         Path client = versionsDir.resolve(ver).resolve(ver + ".jar");
         if (!Files.exists(client)) {
@@ -570,7 +574,7 @@ public final class AuroraEngine {
         return setDefaultPresence("AuroraLauncher", state);
     }
 
-    private int runDiscord(List<String> argv) {
+    int runDiscord(List<String> argv) {
         printer.section("Discord Rich Presence");
         if (!discord.connect()) {
             System.out.println("  Discord is not running (or not found). Rich Presence is unavailable.");
@@ -597,4 +601,24 @@ public final class AuroraEngine {
     public Path versionsDir() { return versionsDir; }
     public Path librariesDir() { return librariesDir; }
     public Path assetsDir() { return assetsDir; }
+
+    /** Installed version ids (subdirectories of versions/). */
+    List<String> installedVersions() {
+        List<String> out = new ArrayList<>();
+        try (var s = Files.list(versionsDir)) {
+            s.filter(Files::isDirectory).forEach(p -> out.add(p.getFileName().toString()));
+        } catch (IOException e) { }
+        Collections.sort(out);
+        return out;
+    }
+
+    /** Latest remote versions (newest first) from the Mojang manifest. */
+    List<Manifest.Version> remoteVersions() throws Exception {
+        return manifest.latest();
+    }
+
+    /** Display name of the active account, for status bars. */
+    String activeAccountName() {
+        try { return auth.active().username; } catch (Exception e) { return "?"; }
+    }
 }

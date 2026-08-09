@@ -10,13 +10,21 @@
     <packaging>jar</packaging>
 
     <name>AuroraLauncher</name>
-    <description>A full-featured, dependency-free Minecraft launcher written in Java.</description>
+    <description>A Minecraft launcher written in Java (dependency-free core; Lanterna powers the optional full-screen TUI).</description>
 
     <properties>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.googlecode.lanterna</groupId>
+            <artifactId>lanterna</artifactId>
+            <version>3.0.5</version>
+        </dependency>
+    </dependencies>
 
     <build>
         <plugins>
@@ -41,6 +49,15 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
                 <version>3.7.1</version>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
                 <configuration>
                     <descriptorRefs>
                         <descriptorRef>jar-with-dependencies</descriptorRef>
