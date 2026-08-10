@@ -413,7 +413,7 @@ public final class AuroraTui {
             String mark = isSel ? "> " : "  ";
             String mode = a.mode == Auth.Mode.CRACKED ? "cracked" : "offline";
             g.putString(x + 2, row, mark + pad(a.username, 20) + "  " + pad(mode, 7) + "  " + a.uuid
-                    + (isActive ? "  <active>" : "") + " ".repeat(w - (x + 2 + mark.length() + 20 + 2 + 7 + 2 + a.uuid.length() + 12)));
+                    + (isActive ? "  <active>" : ""));
             row++; i++;
         }
         g.setBackgroundColor(TextColor.ANSI.DEFAULT);
