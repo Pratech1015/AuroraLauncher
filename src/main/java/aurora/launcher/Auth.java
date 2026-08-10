@@ -116,10 +116,13 @@ public final class Auth {
         return a;
     }
 
-    private void setActive(Account a) {
-        active = accounts.indexOf(a);
-        config.setUsername(a.username, a.uuid);
-        try { config.save(); } catch (Exception ignored) {}
+    public void setActive(Account a) {
+        int idx = accounts.indexOf(a);
+        if (idx >= 0) {
+            active = idx;
+            config.setUsername(a.username, a.uuid);
+            try { config.save(); } catch (Exception ignored) {}
+        }
     }
 
     public Account active() {

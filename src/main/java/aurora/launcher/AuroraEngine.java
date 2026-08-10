@@ -626,4 +626,11 @@ public final class AuroraEngine {
     String activeAccountName() {
         try { return auth.active().username; } catch (Exception e) { return "?"; }
     }
+
+    // -- account accessors used by the TUI popup --
+    List<Auth.Account> accounts() { return auth.all(); }
+    Auth.Account loginAccount(String name) { return auth.login(name); }
+    Auth.Account crackAccount(String name) { return auth.crack(name); }
+    void removeAccount(String name) { auth.remove(name); }
+    void setActiveAccount(Auth.Account a) { auth.setActive(a); }
 }

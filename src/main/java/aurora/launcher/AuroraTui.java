@@ -75,7 +75,7 @@ public final class AuroraTui {
                     case 'i' -> { handleInstall(); continue; }
                     case 'l' -> { handleLaunch(); continue; }
                     case 'r' -> { refreshEntries(); continue; }
-                    case 'a' -> { engine.runAuth(new ArrayList<>()); continue; }
+                    case 'a' -> { accountsPopup(screen); continue; }
                     case 'd' -> { discordOn = !discordOn;
                         if (discordOn) {
                             status = engine.setDefaultPresence("AuroraLauncher", "idle - in TUI")
@@ -260,5 +260,170 @@ public final class AuroraTui {
         g.setForegroundColor(TextColor.ANSI.DEFAULT);
         g.setBackgroundColor(TextColor.ANSI.DEFAULT);
         screen.refresh();
+    }
+
+    // -- Accounts popup (modal, drawn inside the TUI) --
+
+    private void accountsPopup(Screen screen) throws IOException, InterruptedException {
+        int sel = 0;
+        while (true) {
+            drawAccountsOverlay(screen, sel);
+            KeyStroke k = screen.readInput();
+            if (k == null) continue;
+            KeyType t = k.getKeyType();
+            if (t == KeyType.Escape) { status = ""; break; }
+            if (t == KeyType.Character && k.getCharacter() != null) {
+                char c = Character.toLowerCase(k.getCharacter());
+                switch (c) {
+                    case 'q' -> { status = ""; return; }
+                    case 'j' -> sel = step(sel, 1);
+                    case 'k' -> sel = step(sel, -1);
+                    case 'a' -> addAccount(screen);
+                    case 'r' -> { if (removeAccount(sel)) refreshEntries(); }
+                    case 'x' -> { status = ""; return; }
+                    default -> {}
+                }
+            } else if (t == KeyType.ArrowDown) { sel = step(sel, 1); }
+            else if (t == KeyType.ArrowUp) { sel = step(sel, -1); }
+            else if (t == KeyType.Enter) { activateAccount(sel); }
+        }
+    }
+
+    private int step(int sel, int d) {
+        var list = engine.accounts();
+        if (list.isEmpty()) return 0;
+        return Math.floorMod(sel + d, list.size());
+    }
+
+    private void addAccount(Screen screen) throws IOException, InterruptedException {
+        String name = promptText(screen, "username: ");
+        if (name == null || name.trim().isEmpty()) { status = "add cancelled"; return; }
+        char mode = promptMode(screen, name);
+        try {
+            if (mode == 'c') { engine.crackAccount(name.trim()); status = "added cracked: " + name; }
+            else { engine.loginAccount(name.trim()); status = "added offline: " + name; }
+        } catch (Exception e) { status = "error: " + e.getMessage(); }
+    }
+
+    private boolean removeAccount(int sel) {
+        var list = engine.accounts();
+        if (list.isEmpty()) { status = "no accounts"; return false; }
+        if (list.size() <= 1) { status = "keep at least one account"; return false; }
+        var a = list.get(Math.floorMod(sel, list.size()));
+        engine.removeAccount(a.username);
+        status = "removed " + a.username;
+        return true;
+    }
+
+    private void activateAccount(int sel) {
+        var list = engine.accounts();
+        if (list.isEmpty()) { status = "no accounts"; return; }
+        var a = list.get(Math.floorMod(sel, list.size()));
+        engine.setActiveAccount(a);
+        status = "active: " + a.username;
+    }
+
+    private String promptText(Screen screen, String label) throws IOException, InterruptedException {
+        StringBuilder sb = new StringBuilder();
+        TerminalSize ts = screen.getTerminalSize();
+        TextGraphics g = screen.newTextGraphics();
+        while (true) {
+            g.fillRectangle(new TerminalPosition(0, ts.getRows() - 2), new TerminalSize(ts.getColumns(), 2), ' ');
+            g.putString(0, ts.getRows() - 2, label + sb + "\u2588");
+            screen.refresh();
+            KeyStroke k = screen.readInput();
+            if (k == null) continue;
+            if (k.getKeyType() == KeyType.Enter) {
+                g.fillRectangle(new TerminalPosition(0, ts.getRows() - 2), new TerminalSize(ts.getColumns(), 2), ' ');
+                screen.refresh();
+                return sb.toString();
+            }
+            if (k.getKeyType() == KeyType.Escape) {
+                g.fillRectangle(new TerminalPosition(0, ts.getRows() - 2), new TerminalSize(ts.getColumns(), 2), ' ');
+                screen.refresh();
+                return null;
+            }
+            if (k.getKeyType() == KeyType.Backspace || k.getKeyType() == KeyType.Delete) {
+                if (sb.length() > 0) sb.setLength(sb.length() - 1);
+            } else if (k.getKeyType() == KeyType.Character && k.getCharacter() != null) {
+                char c = k.getCharacter();
+                if (c >= 32 && c < 127) sb.append(c);
+            }
+        }
+    }
+
+    private char promptMode(Screen screen, String name) throws IOException, InterruptedException {
+        TerminalSize ts = screen.getTerminalSize();
+        TextGraphics g = screen.newTextGraphics();
+        g.fillRectangle(new TerminalPosition(0, ts.getRows() - 1), new TerminalSize(ts.getColumns(), 1), ' ');
+        g.putString(0, ts.getRows() - 1, "Add '" + name + "' as offline [o] or cracked [c]? ");
+        screen.refresh();
+        while (true) {
+            KeyStroke k = screen.readInput();
+            if (k == null) continue;
+            if (k.getKeyType() == KeyType.Character && k.getCharacter() != null) {
+                char c = Character.toLowerCase(k.getCharacter());
+                if (c == 'c') return 'c';
+                if (c == 'o') return 'o';
+            }
+            if (k.getKeyType() == KeyType.Escape) return 'o';
+        }
+    }
+
+    private void drawAccountsOverlay(Screen screen, int sel) throws IOException {
+        TerminalSize ts = screen.getTerminalSize();
+        int cols = ts.getColumns();
+        int rows = ts.getRows();
+        TextGraphics g = screen.newTextGraphics();
+        int w = Math.max(50, cols / 2);
+        int h = Math.min(16, rows - 4);
+        int x = (cols - w) / 2;
+        int y = (rows - h) / 2 - 1;
+        for (int yy = 0; yy < rows; yy++) {
+            g.fillRectangle(new TerminalPosition(0, yy), new TerminalSize(cols, 1), ' ');
+        }
+        g.setBackgroundColor(TextColor.ANSI.WHITE);
+        g.setForegroundColor(TextColor.ANSI.BLACK);
+        for (int i = 0; i < w; i++) { g.setCharacter(x + i, y, ' '); g.setCharacter(x + i, y + h - 1, ' '); }
+        for (int i = 0; i < h; i++) { g.setCharacter(x, y + i, '|'); g.setCharacter(x + w - 1, y + i, '|'); }
+        g.setCharacter(x, y, '+'); g.setCharacter(x + w - 1, y, '+');
+        g.setCharacter(x, y + h - 1, '+'); g.setCharacter(x + w - 1, y + h - 1, '+');
+        g.putString(x + 1, y, " Accounts ");
+        g.setForegroundColor(TextColor.ANSI.YELLOW);
+        g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+        g.putString(x + 2, y + 2, "  >  username               mode      uuid  <active>");
+        var list = engine.accounts();
+        String active = engine.activeAccountName();
+        int row = y + 3;
+        int i = 0;
+        for (var a : list) {
+            if (row >= y + h - 2) break;
+            boolean isSel = (i == sel);
+            boolean isActive = a.username.equals(active);
+            if (isSel) {
+                g.setBackgroundColor(TextColor.ANSI.CYAN);
+                g.setForegroundColor(TextColor.ANSI.BLACK);
+            } else if (isActive) {
+                g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+                g.setForegroundColor(TextColor.ANSI.GREEN);
+            } else {
+                g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+                g.setForegroundColor(TextColor.ANSI.WHITE);
+            }
+            String mark = isSel ? "> " : "  ";
+            String mode = a.mode == Auth.Mode.CRACKED ? "cracked" : "offline";
+            g.putString(x + 2, row, mark + pad(a.username, 20) + "  " + pad(mode, 7) + "  " + a.uuid
+                    + (isActive ? "  <active>" : "") + " ".repeat(w - (x + 2 + mark.length() + 20 + 2 + 7 + 2 + a.uuid.length() + 12)));
+            row++; i++;
+        }
+        g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+        g.setForegroundColor(TextColor.ANSI.DEFAULT);
+        g.putString(x + 2, y + h - 1, "[a]dd [r]emove Enter=set active [q]/[Esc]=close");
+        screen.refresh();
+    }
+
+    private static String pad(String s, int w) {
+        if (s == null) s = "";
+        return s.length() >= w ? s.substring(0, w) : s + " ".repeat(w - s.length());
     }
 }
