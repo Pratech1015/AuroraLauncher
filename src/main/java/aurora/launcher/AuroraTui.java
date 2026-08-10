@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Full-screen terminal UI for AuroraLauncher, inspired by opencode's TUI.
+ *Full-screen terminal UI for AuroraLauncher.
  *
  * Low-level Lanterna {@link Screen}/{@link TextGraphics} rendering: a left pane
  * lists versions (installed first, then the latest remote releases), a right
@@ -208,7 +208,7 @@ public final class AuroraTui {
         g.fillRectangle(TerminalPosition.TOP_LEFT_CORNER, ts, ' ');
 
         g.setForegroundColor(TextColor.ANSI.CYAN);
-        g.putString(0, 0, " AuroraLauncher TUI  (opencode-style)");
+        g.putString(0, 0, " AuroraLauncher TUI");
         g.drawLine(0, 1, cols - 1, 1, '-');
         g.setForegroundColor(TextColor.ANSI.YELLOW);
         g.putString(0, 2, " Versions  [installed=" + showInstalled + "]  filter=/" + filter + "  [/]=filter [x]=toggle [r]=refresh [a]=accounts [d]=discord [q]=quit");
