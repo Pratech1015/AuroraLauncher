@@ -19,8 +19,8 @@ import java.util.*;
  */
 public final class MicrosoftAuth {
 
-    /** Public Minecraft Launcher app id (shared by OSS launchers). */
-    static final String CLIENT_ID = "00000000-402b-4cd3-a82b-c45ab2f1d3f7";
+    /** Public Minecraft- Launcher app id shared by OSS launchers (Prism's default). */
+    static final String CLIENT_ID = "17b47edd-c884-4997-926d-9e7f9a6b4647";
 
     /** Scope that yields a token usable for the XBL handoff. */
     private static final String[] SCOPES = {"xboxLive.signin", "offline_access"};
@@ -33,17 +33,29 @@ public final class MicrosoftAuth {
     private final Http http;
     private final Printer printer;
 
-    public MicrosoftAuth(Http http, Printer printer) {
+    MicrosoftAuth(Http http, Printer printer) {
         this.http = http;
         this.printer = printer;
+    }
+
+    /** Resolve the client id: env/property override, else the shared public id. */
+    private static String clientId() {
+        String v = System.getenv("AURORA_MS_CLIENT_ID");
+        if (v == null || v.isBlank()) v = System.getProperty("aurora.ms.client_id");
+        return (v == null || v.isBlank()) ? CLIENT_ID : v.trim();
     }
 
     /** One round of the device-code grant: start the flow, getting user_code + URL. */
     public DeviceCode start() throws Exception {
         Map<String, String> f = new LinkedHashMap<>();
-        f.put("client_id", CLIENT_ID);
+        f.put("client_id", clientId());
         f.put("scope", String.join(" ", SCOPES));
         Map<String, Object> m = parse(http.postForm(AUTH_BASE + "devicecode", f));
+        String err = Json.str(m, "error");
+        if (err != null) throw new IOException("microsoft start failed: "
+                + Json.str(m, "error_description", err)
+                + (err.contains("700016") || "unauthorized_client".equals(err)
+                    ? " — set AURORA_MS_CLIENT_ID to a registered Azure public-client app id" : ""));
         String userCode = require(m, "user_code");
         String uri = require(m, "verification_uri");
         String message = Json.str(m, "message");
@@ -58,7 +70,7 @@ public final class MicrosoftAuth {
         long deadline = dc.expiresAt;
         long intervalMs = dc.intervalMs;
         Map<String, String> f = new LinkedHashMap<>();
-        f.put("client_id", CLIENT_ID);
+        f.put("client_id", clientId());
         f.put("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
         f.put("device_code", dc.deviceCode);
         while (true) {
