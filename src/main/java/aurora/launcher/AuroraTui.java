@@ -279,7 +279,7 @@ public final class AuroraTui {
                     case 'j' -> sel = step(sel, 1);
                     case 'k' -> sel = step(sel, -1);
                     case 'a' -> addCrackedAccount(screen);
-                    case 'm' -> addMicrosoftAccount(screen);
+                    case 'm' -> addMicrosoftAccount(screen, sel);
                     case 'r' -> { if (removeAccount(sel)) refreshEntries(); }
                     case 'x' -> { status = ""; return; }
                     default -> {}
@@ -305,8 +305,10 @@ public final class AuroraTui {
         } catch (Exception e) { status = "error: " + e.getMessage(); }
     }
 
-    private void addMicrosoftAccount(Screen screen) throws IOException, InterruptedException {
+    private void addMicrosoftAccount(Screen screen, int sel) throws IOException, InterruptedException {
         MicrosoftAuth ma = engine.microsoftAuth();
+        status = "microsoft: contacting Microsoft...";
+        drawAccountsOverlay(screen, sel);
         MicrosoftAuth.DeviceCode dc;
         try { dc = ma.start(); } catch (Exception e) { status = "microsoft start failed: " + e.getMessage(); return; }
         showDeviceCode(screen, dc);
@@ -434,6 +436,13 @@ public final class AuroraTui {
         g.setBackgroundColor(TextColor.ANSI.DEFAULT);
         g.setForegroundColor(TextColor.ANSI.DEFAULT);
         g.putString(x + 2, y + h - 1, "[a]dd cracked  [m]icrosoft  [r]emove  Enter=set active  [q]/[Esc]=close");
+        if (status != null && !status.isEmpty()) {
+            g.setBackgroundColor(TextColor.ANSI.BLACK);
+            g.setForegroundColor(TextColor.ANSI.YELLOW);
+            g.putString(x + 2, y + h, " " + status);
+        }
+        g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+        g.setForegroundColor(TextColor.ANSI.DEFAULT);
         screen.refresh();
     }
 
