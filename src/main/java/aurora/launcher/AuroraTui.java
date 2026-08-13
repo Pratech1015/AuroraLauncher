@@ -334,7 +334,7 @@ public final class AuroraTui {
         for (int i = 0; i < h; i++) g.fillRectangle(new TerminalPosition(x, y + i), new TerminalSize(ts.getColumns() - x - 1, 1), ' ');
         g.putString(x, y,   " Microsoft sign-in required ");
         g.putString(x, y + 2, " Open: " + dc.verificationUri);
-        g.putString(x, y + 3, " Enter code: " + dc.deviceCode);
+        g.putString(x, y + 3, " Enter code: " + dc.userCode);
         g.putString(x, y + 4, " Waiting for sign-in... (polling)");
         g.setBackgroundColor(TextColor.ANSI.DEFAULT);
         g.setForegroundColor(TextColor.ANSI.DEFAULT);

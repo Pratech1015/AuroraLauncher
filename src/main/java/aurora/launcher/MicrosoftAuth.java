@@ -56,12 +56,14 @@ public final class MicrosoftAuth {
                 + Json.str(m, "error_description", err)
                 + (err.contains("700016") || "unauthorized_client".equals(err)
                     ? " — set AURORA_MS_CLIENT_ID to a registered Azure public-client app id" : ""));
-        String userCode = require(m, "user_code");
+        String code = require(m, "device_code");      // long token used for polling
+        String userCode = require(m, "user_code");    // short code shown to the user
         String uri = require(m, "verification_uri");
         String message = Json.str(m, "message");
         int expiresIn = toInt(m, "expires_in", 900);
         int interval = toInt(m, "interval", 1);
-        return new DeviceCode(userCode, uri, message == null ? ("Open " + uri + " and enter code " + userCode) : message,
+        return new DeviceCode(code, userCode, uri,
+                message == null ? ("Open " + uri + " and enter code " + userCode) : message,
                 System.currentTimeMillis() + expiresIn * 1000L, Math.max(interval, 1) * 1000L);
     }
 
@@ -163,10 +165,14 @@ public final class MicrosoftAuth {
 
     /** One round of the device-code grant: start the flow, getting user_code + URL. */
     public static final class DeviceCode {
-        public final String deviceCode, verificationUri, message;
+        public final String deviceCode;    // long token used for polling
+        public final String userCode;      // short code shown to the user
+        public final String verificationUri, message;
         public final long expiresAt, intervalMs;
-        DeviceCode(String deviceCode, String verificationUri, String message, long expiresAt, long intervalMs) {
+        DeviceCode(String deviceCode, String userCode, String verificationUri, String message,
+                   long expiresAt, long intervalMs) {
             this.deviceCode = deviceCode;
+            this.userCode = userCode;
             this.verificationUri = verificationUri;
             this.message = message;
             this.expiresAt = expiresAt;
