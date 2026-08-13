@@ -5,6 +5,7 @@ import java.net.URI;
 import java.net.http.*;
 import java.nio.file.*;
 import java.time.Duration;
+import java.util.Map;
 import java.util.zip.GZIPInputStream;
 
 /**
@@ -33,26 +34,65 @@ public final class Http {
                 .build();
     }
 
+    /** GET {@code url}, returning the decoded body (or {@code null} on 404). */
     public String get(String url, String range) throws Exception {
-        HttpRequest.Builder rb = HttpRequest.newBuilder()
+        HttpRequest.Builder rb = newBuilder(url);
+        if (range != null) rb.header("Range", range);
+        return read(client.send(rb.build(), HttpResponse.BodyHandlers.ofByteArray()));
+    }
+
+    /** GET {@code url} with a single extra header (e.g. Authorization), returning decoded body. */
+    public String getWithHeader(String url, String headerName, String headerValue) throws Exception {
+        HttpRequest.Builder rb = newBuilder(url);
+        if (headerName != null) rb.header(headerName, headerValue);
+        return read(client.send(rb.build(), HttpResponse.BodyHandlers.ofByteArray()));
+    }
+
+    private HttpRequest.Builder newBuilder(String url) {
+        return HttpRequest.newBuilder()
                 .timeout(Duration.ofSeconds(60))
                 .GET()
                 .header("Accept", "*/*")
                 .header("User-Agent", "AuroraLauncher/1.0")
-                .header("Accept-Encoding", "gzip, deflate");
-        if (range != null) rb.header("Range", range);
-        HttpRequest req = rb.uri(URI.create(url)).build();
-        HttpResponse<byte[]> resp = client.send(req, HttpResponse.BodyHandlers.ofByteArray());
+                .header("Accept-Encoding", "gzip, deflate")
+                .uri(URI.create(url));
+    }
+
+
+    /** POST a form or raw body. Returns the response body text for any status (callers parse errors). */
+    public String post(String url, String body, String contentType) throws Exception {
+        HttpRequest req = HttpRequest.newBuilder()
+                .timeout(Duration.ofSeconds(60))
+                .header("Accept", "*/*")
+                .header("User-Agent", "AuroraLauncher/1.0")
+                .header("Content-Type", contentType)
+                .POST(HttpRequest.BodyPublishers.ofString(body, java.nio.charset.StandardCharsets.UTF_8))
+                .uri(URI.create(url))
+                .build();
+        return read(client.send(req, HttpResponse.BodyHandlers.ofByteArray()));
+    }
+
+    /** POST a form-encoded body built from {@code form}, returning the response body text. */
+    public String postForm(String url, Map<String, String> form) throws Exception {
+        StringBuilder b = new StringBuilder();
+        for (Map.Entry<String, String> e : form.entrySet()) {
+            if (!b.isEmpty()) b.append('&');
+            b.append(encode(e.getKey())).append('=').append(encode(e.getValue()));
+        }
+        return post(url, b.toString(), "application/x-www-form-urlencoded");
+    }
+
+    private static String encode(String s) {
+        return java.net.URLEncoder.encode(s == null ? "" : s, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private String read(HttpResponse<byte[]> resp) throws IOException {
         int code = resp.statusCode();
         if (code == 404) return null;
-        if (code >= 400) throw new IOException("HTTP " + code + " for " + url);
         byte[] bytes = resp.body();
         String enc = resp.headers().firstValue("Content-Encoding").orElse("");
-        if (enc.equalsIgnoreCase("gzip") && bytes.length > 0 && bytes[0] == 0x1f) {
-            bytes = ungzip(bytes);
-        } else if (enc.equalsIgnoreCase("deflate")) {
-            bytes = inflate(bytes);
-        }
+        if (enc.equalsIgnoreCase("gzip") && bytes.length > 0 && bytes[0] == 0x1f) bytes = ungzip(bytes);
+        else if (enc.equalsIgnoreCase("deflate")) bytes = inflate(bytes);
         return new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
     }
 

@@ -179,6 +179,10 @@ public final class Json {
         Object v = m.get(key);
         return v == null ? null : v.toString();
     }
+    public static String str(Map<String, Object> m, String key, String def) {
+        Object v = m.get(key);
+        return v == null ? def : v.toString();
+    }
     public static Object obj(Map<String, Object> m, String key) {
         return m.get(key);
     }

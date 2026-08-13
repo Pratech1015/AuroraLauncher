@@ -9,15 +9,13 @@ import java.util.regex.Pattern;
 /**
  * Account management for AuroraLauncher.
  *
- * Supports two modes:
+ * Two kinds of accounts are supported:
  * <ul>
- *   <li>{@link Mode#OFFLINE}   - standard offline profile (username -> deterministic UUID).
- *   <li>{@link Mode#CRACKED}   - same credentials, flagged as a cracked/non-premium launch.
+ *   <li>{@link Mode#CRACKED}   - local, non-premium profile (username -> deterministic
+ *       offline UUID). Runs without a Microsoft account ({@code accessToken=0, userType=legacy}).
+ *   <li>{@link Mode#PREMIUM}   - Microsoft/Xbox Live account obtained via device-code
+ *       OAuth. Carries a real Minecraft bearer token, {@code userType=xbox}.
  * </ul>
- *
- * Both modes are launched with {@code accessToken=0} and {@code userType=legacy},
- * which is exactly what lets the game run without a Microsoft account. A real
- * launcher would exchange these for an XBox Live / Yggdrasil token here.
  *
  * Accounts are persisted to <root>/accounts.json. The active account's username
  * is mirrored back into config.json so it survives across runs.
@@ -27,7 +25,7 @@ public final class Auth {
     /** Valid Minecraft username: 3-16 chars, alphanumeric + underscore. */
     private static final Pattern USERNAME = Pattern.compile("^[A-Za-z0-9_]{3,16}$");
 
-    public enum Mode { OFFLINE, CRACKED }
+    public enum Mode { CRACKED, PREMIUM }
 
     /** A saved account. */
     public static final class Account {
@@ -35,7 +33,7 @@ public final class Auth {
         public final String username;
         public final String uuid;
         public final String accessToken;
-        public final String userType;   // "legacy" (offline/cracked) or "mojang" (premium)
+        public final String userType;   // "legacy" (cracked) or "xbox" (premium)
 
         public Account(Mode mode, String username, String uuid, String accessToken, String userType) {
             this.mode = mode;
@@ -88,19 +86,28 @@ public final class Auth {
         return username != null && USERNAME.matcher(username).matches();
     }
 
-    /** Create/select an offline account. Mirrors name into config.json. */
-    public Account login(String username) {
+    /** Create/select a cracked (local, non-premium) account. Mirrors name into config.json. */
+    public Account crack(String username) {
         if (!validUsername(username)) throw new IllegalArgumentException("invalid username: " + username);
-        Account a = lookup(username, Mode.OFFLINE);
+        Account a = lookup(username, Mode.CRACKED);
         setActive(a);
         save();
         return a;
     }
 
-    /** Create/select a cracked (non-premium) account. */
-    public Account crack(String username) {
-        if (!validUsername(username)) throw new IllegalArgumentException("invalid username: " + username);
-        Account a = lookup(username, Mode.CRACKED);
+    /** Create/overwrite a premium (Microsoft) account record and make it active. */
+    public Account microsoft(String username, String uuid, String accessToken) {
+        if (username == null || uuid == null || accessToken == null)
+            throw new IllegalArgumentException("microsoft account fields required");
+        Account a = lookup(username, Mode.PREMIUM);
+        int idx = accounts.indexOf(a);
+        if (idx >= 0) {
+            a = new Account(Mode.PREMIUM, username, uuid, accessToken, "xbox");
+            accounts.set(idx, a);
+        } else {
+            a = new Account(Mode.PREMIUM, username, uuid, accessToken, "xbox");
+            accounts.add(a);
+        }
         setActive(a);
         save();
         return a;
@@ -127,8 +134,8 @@ public final class Auth {
 
     public Account active() {
         if (active < 0 || active >= accounts.size()) {
-            // Default to an offline "Player" account.
-            Account a = login("Player");
+            // Default to a cracked "Player" account.
+            Account a = crack("Player");
             return a;
         }
         return accounts.get(active);

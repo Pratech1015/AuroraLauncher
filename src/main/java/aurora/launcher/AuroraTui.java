@@ -278,7 +278,8 @@ public final class AuroraTui {
                     case 'q' -> { status = ""; return; }
                     case 'j' -> sel = step(sel, 1);
                     case 'k' -> sel = step(sel, -1);
-                    case 'a' -> addAccount(screen);
+                    case 'a' -> addCrackedAccount(screen);
+                    case 'm' -> addMicrosoftAccount(screen);
                     case 'r' -> { if (removeAccount(sel)) refreshEntries(); }
                     case 'x' -> { status = ""; return; }
                     default -> {}
@@ -295,16 +296,48 @@ public final class AuroraTui {
         return Math.floorMod(sel + d, list.size());
     }
 
-    private void addAccount(Screen screen) throws IOException, InterruptedException {
-        String name = promptText(screen, "username: ");
+    private void addCrackedAccount(Screen screen) throws IOException, InterruptedException {
+        String name = promptText(screen, "cracked username: ");
         if (name == null || name.trim().isEmpty()) { status = "add cancelled"; return; }
-        char mode = promptMode(screen, name);
         try {
-            if (mode == 'c') { engine.crackAccount(name.trim()); status = "added cracked: " + name; }
-            else { engine.loginAccount(name.trim()); status = "added offline: " + name; }
+            engine.crackAccount(name.trim()); status = "added cracked: " + name;
+            refreshEntries();
         } catch (Exception e) { status = "error: " + e.getMessage(); }
     }
 
+    private void addMicrosoftAccount(Screen screen) throws IOException, InterruptedException {
+        MicrosoftAuth ma = engine.microsoftAuth();
+        MicrosoftAuth.DeviceCode dc;
+        try { dc = ma.start(); } catch (Exception e) { status = "microsoft start failed: " + e.getMessage(); return; }
+        showDeviceCode(screen, dc);
+        status = "signing in...";
+        String token;
+        try { token = ma.poll(dc); } catch (Exception e) { status = "microsoft sign-in: " + e.getMessage(); return; }
+        Auth.Account a;
+        try { a = ma.exchange(token); } catch (Exception e) { status = "microsoft exchange failed: " + e.getMessage(); return; }
+        try {
+            engine.microsoftAccount(a.username, a.uuid, a.accessToken);
+            refreshEntries();
+            status = "signed in as " + a.username;
+        } catch (Exception e) { status = "microsoft save failed: " + e.getMessage(); }
+    }
+
+    private void showDeviceCode(Screen screen, MicrosoftAuth.DeviceCode dc) throws IOException {
+        TerminalSize ts = screen.getTerminalSize();
+        TextGraphics g = screen.newTextGraphics();
+        int h = 8;
+        int x = 2, y = ts.getRows() - h - 1;
+        g.setBackgroundColor(TextColor.ANSI.BLACK);
+        g.setForegroundColor(TextColor.ANSI.WHITE);
+        for (int i = 0; i < h; i++) g.fillRectangle(new TerminalPosition(x, y + i), new TerminalSize(ts.getColumns() - x - 1, 1), ' ');
+        g.putString(x, y,   " Microsoft sign-in required ");
+        g.putString(x, y + 2, " Open: " + dc.verificationUri);
+        g.putString(x, y + 3, " Enter code: " + dc.deviceCode);
+        g.putString(x, y + 4, " Waiting for sign-in... (polling)");
+        g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+        g.setForegroundColor(TextColor.ANSI.DEFAULT);
+        screen.refresh();
+    }
     private boolean removeAccount(int sel) {
         var list = engine.accounts();
         if (list.isEmpty()) { status = "no accounts"; return false; }
@@ -352,24 +385,6 @@ public final class AuroraTui {
         }
     }
 
-    private char promptMode(Screen screen, String name) throws IOException, InterruptedException {
-        TerminalSize ts = screen.getTerminalSize();
-        TextGraphics g = screen.newTextGraphics();
-        g.fillRectangle(new TerminalPosition(0, ts.getRows() - 1), new TerminalSize(ts.getColumns(), 1), ' ');
-        g.putString(0, ts.getRows() - 1, "Add '" + name + "' as offline [o] or cracked [c]? ");
-        screen.refresh();
-        while (true) {
-            KeyStroke k = screen.readInput();
-            if (k == null) continue;
-            if (k.getKeyType() == KeyType.Character && k.getCharacter() != null) {
-                char c = Character.toLowerCase(k.getCharacter());
-                if (c == 'c') return 'c';
-                if (c == 'o') return 'o';
-            }
-            if (k.getKeyType() == KeyType.Escape) return 'o';
-        }
-    }
-
     private void drawAccountsOverlay(Screen screen, int sel) throws IOException {
         TerminalSize ts = screen.getTerminalSize();
         int cols = ts.getColumns();
@@ -411,14 +426,14 @@ public final class AuroraTui {
                 g.setForegroundColor(TextColor.ANSI.WHITE);
             }
             String mark = isSel ? "> " : "  ";
-            String mode = a.mode == Auth.Mode.CRACKED ? "cracked" : "offline";
+            String mode = a.mode == Auth.Mode.CRACKED ? "cracked" : "premium";
             g.putString(x + 2, row, mark + pad(a.username, 20) + "  " + pad(mode, 7) + "  " + a.uuid
                     + (isActive ? "  <active>" : ""));
             row++; i++;
         }
         g.setBackgroundColor(TextColor.ANSI.DEFAULT);
         g.setForegroundColor(TextColor.ANSI.DEFAULT);
-        g.putString(x + 2, y + h - 1, "[a]dd [r]emove Enter=set active [q]/[Esc]=close");
+        g.putString(x + 2, y + h - 1, "[a]dd cracked  [m]icrosoft  [r]emove  Enter=set active  [q]/[Esc]=close");
         screen.refresh();
     }
 

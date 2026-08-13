@@ -178,7 +178,18 @@ public final class AuroraEngine {
                 DISCORD_ASSET_KEY, "AuroraLauncher");
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(mc.workDir.toFile());
-        pb.inheritIO();
+        // Do NOT inheritIO: the game's stdout/stderr would write straight into the
+        // launcher's (TUI) terminal, garbling the screen. Send them to a log file
+        // under the instance's logs/ dir instead and let the game's own log4j
+        // continue writing logs/latest.log as usual.
+        Path gameLog = mc.workDir.resolve("logs").resolve("launcher.log");
+        try { Files.createDirectories(gameLog.getParent()); } catch (IOException ignored) {}
+        pb.redirectErrorStream(true);
+        try {
+            pb.redirectOutput(ProcessBuilder.Redirect.appendTo(gameLog.toFile()));
+        } catch (Exception e) {
+            System.err.println("  (could not redirect game output to " + gameLog + "; game output will be discarded)");
+        }
         try {
             Process p = pb.start();
             int rc = p.waitFor();
@@ -495,9 +506,10 @@ public final class AuroraEngine {
         System.out.println("  aurora install <ver>          download & verify a version");
         System.out.println("  aurora launch <ver> [opts]    launch it");
         System.out.println("  aurora <ver>                  launch a version directly");
-        System.out.println("  aurora auth                   show accounts");
-        System.out.println("  aurora auth login <name>      set an offline profile");
-        System.out.println("  aurora auth crack <name>      set a cracked (non-premium) profile");
+         System.out.println("  aurora auth                   show accounts");
+         System.out.println("  aurora auth crack <name>      set a cracked (local) profile");
+         System.out.println("  aurora auth microsoft         sign in with a Microsoft account");
+         System.out.println("  aurora auth rm <name>         remove an account");
         System.out.println("  aurora crack <ver>            strip signatures from a client jar");
         System.out.println("  aurora discord [details]      set Discord rich presence");
         System.out.println("  aurora tui                     launch full-screen terminal UI");
@@ -516,18 +528,18 @@ public final class AuroraEngine {
             return 0;
         }
         switch (argv.remove(0).toLowerCase(Locale.ROOT)) {
-            case "login" -> {
-                if (argv.isEmpty()) { System.err.println("usage: auth login <name>"); return 1; }
-                String name = argv.remove(0);
-                try { System.out.println("  offline: " + auth.login(name).username); }
-                catch (Exception e) { System.err.println("  " + e.getMessage()); return 1; }
-                return 0;
-            }
             case "crack" -> {
                 if (argv.isEmpty()) { System.err.println("usage: auth crack <name>"); return 1; }
                 String name = argv.remove(0);
                 try { System.out.println("  cracked: " + auth.crack(name).username); }
                 catch (Exception e) { System.err.println("  " + e.getMessage()); return 1; }
+                return 0;
+            }
+            case "microsoft" -> {
+                try {
+                    Auth.Account a = new MicrosoftAuth(http, printer).signIn(true);
+                    System.out.println("  microsoft: " + a.username + " (uuid " + a.uuid + ")");
+                } catch (Exception e) { System.err.println("  microsoft auth failed: " + e.getMessage()); return 1; }
                 return 0;
             }
             case "rm" -> {
@@ -629,8 +641,9 @@ public final class AuroraEngine {
 
     // -- account accessors used by the TUI popup --
     List<Auth.Account> accounts() { return auth.all(); }
-    Auth.Account loginAccount(String name) { return auth.login(name); }
     Auth.Account crackAccount(String name) { return auth.crack(name); }
+    Auth.Account microsoftAccount(String name, String uuid, String token) { return auth.microsoft(name, uuid, token); }
     void removeAccount(String name) { auth.remove(name); }
     void setActiveAccount(Auth.Account a) { auth.setActive(a); }
+    MicrosoftAuth microsoftAuth() { return new MicrosoftAuth(http, printer); }
 }
