@@ -311,10 +311,23 @@ public final class AuroraTui {
         drawAccountsOverlay(screen, sel);
         MicrosoftAuth.DeviceCode dc;
         try { dc = ma.start(); } catch (Exception e) { status = "microsoft start failed: " + e.getMessage(); return; }
+        status = "microsoft: sign in at the URL above with code " + dc.userCode;
         showDeviceCode(screen, dc);
-        status = "signing in...";
-        String token;
-        try { token = ma.poll(dc); } catch (Exception e) { status = "microsoft sign-in: " + e.getMessage(); return; }
+        String token = null;
+        long next = dc.intervalMs;
+        while (true) {
+            // Give the user a chance to cancel while we wait for them to finish in-browser.
+            if (waitCancelable(screen, next, "microsoft: waiting for sign-in... (q/Esc to cancel)")) {
+                status = "microsoft sign-in cancelled";
+                return;
+            }
+            showDeviceCode(screen, dc);
+            MicrosoftAuth.PollResult pr;
+            try { pr = ma.pollOnce(dc); } catch (Exception e) { status = "microsoft poll error: " + e.getMessage(); return; }
+            if (pr.done()) { token = pr.token; break; }
+            if (pr.error()) { status = "microsoft: " + pr.message; return; }
+            next = pr.nextIntervalMs;
+        }
         Auth.Account a;
         try { a = ma.exchange(token); } catch (Exception e) { status = "microsoft exchange failed: " + e.getMessage(); return; }
         try {
@@ -322,6 +335,24 @@ public final class AuroraTui {
             refreshEntries();
             status = "signed in as " + a.username;
         } catch (Exception e) { status = "microsoft save failed: " + e.getMessage(); }
+    }
+
+    /** Sleep up to {@code ms} while watching for q/Esc to cancel. Returns true if cancelled. */
+    private boolean waitCancelable(Screen screen, long ms, String waitStatus) throws IOException, InterruptedException {
+        status = waitStatus;
+        long end = System.currentTimeMillis() + ms;
+        while (System.currentTimeMillis() < end) {
+            KeyStroke k = screen.pollInput();
+            if (k != null) {
+                KeyType t = k.getKeyType();
+                if (t == KeyType.Escape) return true;
+                if (t == KeyType.Character && k.getCharacter() != null
+                        && Character.toLowerCase(k.getCharacter()) == 'q') return true;
+                // swallow other keys during the wait
+            }
+            Thread.sleep(80);
+        }
+        return false;
     }
 
     private void showDeviceCode(Screen screen, MicrosoftAuth.DeviceCode dc) throws IOException {
@@ -335,7 +366,7 @@ public final class AuroraTui {
         g.putString(x, y,   " Microsoft sign-in required ");
         g.putString(x, y + 2, " Open: " + dc.verificationUri);
         g.putString(x, y + 3, " Enter code: " + dc.userCode);
-        g.putString(x, y + 4, " Waiting for sign-in... (polling)");
+        g.putString(x, y + 4, " Waiting for sign-in... (q / Esc to cancel)");
         g.setBackgroundColor(TextColor.ANSI.DEFAULT);
         g.setForegroundColor(TextColor.ANSI.DEFAULT);
         screen.refresh();

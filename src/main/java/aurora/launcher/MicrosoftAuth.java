@@ -69,31 +69,55 @@ public final class MicrosoftAuth {
 
     /** Poll the token endpoint until the user completes sign-in; returns the MSA access_token. */
     public String poll(DeviceCode dc) throws Exception {
-        long deadline = dc.expiresAt;
         long intervalMs = dc.intervalMs;
+        while (true) {
+            PollResult r = pollOnce(dc);
+            if (r.state == PollResult.DONE) return r.token;
+            if (r.state == PollResult.ERROR) throw new IOException("oauth: " + r.message);
+            intervalMs = r.nextIntervalMs;
+            Thread.sleep(intervalMs);
+        }
+    }
+
+    /** One non-blocking poll attempt. Returns PENDING (keep polling), DONE (token), or ERROR. */
+    public PollResult pollOnce(DeviceCode dc) throws Exception {
+        if (System.currentTimeMillis() > dc.expiresAt) {
+            return new PollResult(PollResult.ERROR, null, "sign-in expired; restart login", dc.intervalMs);
+        }
         Map<String, String> f = new LinkedHashMap<>();
         f.put("client_id", clientId());
         f.put("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
         f.put("device_code", dc.deviceCode);
-        while (true) {
-            if (System.currentTimeMillis() > deadline) throw new IllegalStateException("sign-in timed out");
-            Map<String, Object> m = parse(http.postForm(AUTH_BASE + "token", f));
-            String token = Json.str(m, "access_token");
-            if (token != null) return token;
-            String err = Json.str(m, "error");
-            if (err != null) {
-                switch (err) {
-                    case "authorization_pending" -> { /* keep polling */ }
-                    case "slow_down" -> intervalMs += 1000L;
-                    case "expired_token" -> throw new IllegalStateException("sign-in expired; restart login");
-                    case "authorization_declined" -> throw new IllegalStateException("sign-in declined");
-                    default -> throw new IOException("oauth error: " + err + " " + Json.str(m, "error_description"));
-                }
-            } else {
-                throw new IOException("unexpected oauth response: " + m);
+        Map<String, Object> m = parse(http.postForm(AUTH_BASE + "token", f));
+        String token = Json.str(m, "access_token");
+        if (token != null) return new PollResult(PollResult.DONE, token, null, dc.intervalMs);
+        String err = Json.str(m, "error");
+        String desc = Json.str(m, "error_description");
+        long next = dc.intervalMs;
+        if (err != null) {
+            switch (err) {
+                case "authorization_pending" -> { return new PollResult(PollResult.PENDING, null, null, next); }
+                case "slow_down" -> { next += 1000L; return new PollResult(PollResult.PENDING, null, null, next); }
+                case "expired_token" -> { return new PollResult(PollResult.ERROR, null, "sign-in expired; restart login", next); }
+                case "authorization_declined" -> { return new PollResult(PollResult.ERROR, null, "sign-in declined", next); }
+                default -> { return new PollResult(PollResult.ERROR, null,
+                        err + (desc != null ? " " + desc : ""), next); }
             }
-            Thread.sleep(intervalMs);
         }
+        return new PollResult(PollResult.ERROR, null, "unexpected oauth response: " + m, next);
+    }
+
+    /** Result of a single {@link #pollOnce} attempt. */
+    public static final class PollResult {
+        public static final int PENDING = 0, DONE = 1, ERROR = 2;
+        public final int state;
+        public final String token, message;
+        public final long nextIntervalMs;
+        PollResult(int state, String token, String message, long nextIntervalMs) {
+            this.state = state; this.token = token; this.message = message; this.nextIntervalMs = nextIntervalMs;
+        }
+        public boolean done() { return state == DONE; }
+        public boolean error() { return state == ERROR; }
     }
 
     /** Complete the chain (XBL -> XSTS -> Minecraft) for a Microsoft access_token. */
