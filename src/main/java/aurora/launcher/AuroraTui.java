@@ -12,6 +12,7 @@ import com.googlecode.lanterna.TerminalPosition;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -39,11 +40,17 @@ public final class AuroraTui {
 
     private final AuroraEngine engine;
     private final List<Entry> entries = new ArrayList<>();
+    private List<Manifest.Version> remoteAll;      // full remote manifest (lazy-loaded once)
+    private int remoteLoaded = 0;                  // how many remote entries have been appended to `entries`
     private int selected = 0;
+    private int scroll = 0;                         // scroll offset into visible()
     private String filter = "";
     private boolean showInstalled = true;
     private boolean discordOn = true;
     private String status = "";
+    private static final int REMOTE_PAGE = 16;       // remote versions loaded per scroll tick
+    private static final int LOAD_MARGIN = 3;
+    private int logScroll = 0;
 
     private record Entry(String id, String type, String releaseTime,
                          boolean installed, boolean remote) {}
@@ -72,7 +79,7 @@ public final class AuroraTui {
                 char c = Character.toLowerCase(k.getCharacter());
                 switch (c) {
                     case 'q' -> { return; }
-                    case 'i' -> { handleInstall(); continue; }
+                     case 'i' -> { handleInstallLog(screen); continue; }
                     case 'l' -> { handleLaunch(); continue; }
                     case 'r' -> { refreshEntries(); continue; }
                     case 'a' -> { accountsPopup(screen); continue; }
@@ -92,8 +99,8 @@ public final class AuroraTui {
             } else {
                 KeyType t = k.getKeyType();
                 if (t == KeyType.Enter) { handleEnter(); continue; }
-                if (t == KeyType.ArrowUp) { move(-1); continue; }
-                if (t == KeyType.ArrowDown) { move(1); continue; }
+                if (t == KeyType.ArrowUp) { move(screen, -1); continue; }
+                if (t == KeyType.ArrowDown) { move(screen, 1); continue; }
                 if (t == KeyType.Escape || t == KeyType.Delete || t == KeyType.Backspace) {
                     if (t == KeyType.Escape) return;
                     if (!filter.isEmpty()) filter = filter.substring(0, filter.length() - 1);
@@ -124,12 +131,6 @@ public final class AuroraTui {
                 if (!filter.isEmpty()) filter = filter.substring(0, filter.length() - 1);
             }
         }
-    }
-
-    private void move(int delta) {
-        List<Entry> v = visible();
-        if (v.isEmpty()) return;
-        selected = Math.floorMod(selected + delta, v.size());
     }
 
     private Entry current() {
@@ -165,6 +166,91 @@ public final class AuroraTui {
         catch (Exception ex) { status = "error: " + ex.getMessage(); }
     }
 
+    private void handleInstallLog(Screen screen) throws IOException, InterruptedException {
+        Entry e = current();
+        if (e == null) { status = "select a version"; return; }
+        if (e.installed) { status = e.id + " already installed"; return; }
+        if (!e.remote) { status = "select a remote version"; return; }
+        status = "";
+        logScroll = 0;
+        installLogOverlay(screen, e.id);
+    }
+
+    private void installLogOverlay(Screen screen, String version) throws IOException, InterruptedException {
+        TerminalSize ts = screen.getTerminalSize();
+        List<String> lines = Collections.synchronizedList(new ArrayList<>());
+        lines.add("installing " + version);
+        java.util.concurrent.atomic.AtomicReference<String> result = new java.util.concurrent.atomic.AtomicReference<>();
+        java.util.concurrent.atomic.AtomicBoolean done = new java.util.concurrent.atomic.AtomicBoolean(false);
+        Thread t = new Thread(() -> {
+            try {
+                boolean ok = engine.installVersion(version, lines::add);
+                result.set(ok ? "installed: " + version : "failed: " + version);
+            } catch (Exception ex) {
+                result.set("error: " + ex.getMessage());
+            } finally {
+                done.set(true);
+            }
+        });
+        t.setDaemon(true);
+        t.start();
+        boolean everDone = false;
+        while (true) {
+            drawInstallLog(screen, version, lines, ts);
+            if (done.get()) {
+                everDone = true;
+                lines.add(result.get());
+                drawInstallLog(screen, version, lines, ts);
+                // any key dismisses the log overlay
+                KeyStroke k = screen.readInput();
+                if (k != null) break;
+            } else {
+                KeyStroke k = screen.pollInput();
+                if (k != null) {
+                    KeyType kt = k.getKeyType();
+                    if (kt == KeyType.Escape) break; // close overlay; install keeps running
+                    if (kt == KeyType.ArrowDown) logScroll += 3;
+                    else if (kt == KeyType.ArrowUp) logScroll = Math.max(0, logScroll - 3);
+                    else if (kt == KeyType.PageDown) logScroll += 20;
+                    else if (kt == KeyType.PageUp) logScroll = Math.max(0, logScroll - 20);
+                }
+                Thread.sleep(150);
+            }
+        }
+        if (everDone) {
+            refreshEntries();
+            status = result.get();
+        } else {
+            status = "install running in background: " + version;
+        }
+    }
+
+    private void drawInstallLog(Screen screen, String version, List<String> lines, TerminalSize ts) throws IOException {
+        int rows = ts.getRows();
+        TextGraphics g = screen.newTextGraphics();
+        g.setBackgroundColor(TextColor.ANSI.BLACK);
+        g.setForegroundColor(TextColor.ANSI.WHITE);
+        for (int y = 0; y < rows; y++) g.fillRectangle(new TerminalPosition(0, y), new TerminalSize(ts.getColumns(), 1), ' ');
+        g.putString(0, 0, " Installing " + version + " ");
+        g.setForegroundColor(TextColor.ANSI.YELLOW);
+        int start = Math.min(logScroll, Math.max(0, lines.size() - 1));
+        int y = 2;
+        synchronized (lines) {
+            for (int i = start; i < lines.size() && y < rows - 2; i++) {
+                String ln = lines.get(i);
+                g.putString(0, y, " " + ln);
+                y++;
+            }
+        }
+        if (lines.size() > start + (rows - 4)) {
+            g.setForegroundColor(TextColor.ANSI.YELLOW);
+            g.putString(0, rows - 2, "   \u25BC scroll");
+        }
+        g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+        g.setForegroundColor(TextColor.ANSI.DEFAULT);
+        screen.refresh();
+    }
+
     private void handleLaunch() {
         Entry e = current();
         if (e == null || !e.installed) { status = "select an installed version"; return; }
@@ -177,17 +263,48 @@ public final class AuroraTui {
         for (String id : engine.installedVersions()) {
             entries.add(new Entry(id, "", "", true, false));
         }
-        try {
-            int n = 0;
-            for (var v : engine.remoteVersions()) {
-                if (entries.stream().anyMatch(e -> e.id.equals(v.id))) continue;
-                entries.add(new Entry(v.id, v.type, v.releaseTime, false, true));
-                if (++n >= 12) break;
-            }
-        } catch (Exception e) {
-            status = "network error: " + e.getMessage();
+        remoteAll = null;
+        remoteLoaded = 0;
+        loadRemotePage();
+        scroll = 0;
+        List<Entry> v = visible();
+        if (selected >= v.size()) selected = v.isEmpty() ? 0 : v.size() - 1;
+    }
+
+    /** Append one page of remote versions to `entries` (de-dup'd, filtered by already-installed). */
+    private void loadRemotePage() {
+        if (remoteAll == null) {
+            try { remoteAll = engine.remoteVersions(); }
+            catch (Exception e) { status = "network error: " + e.getMessage(); remoteAll = List.of(); }
         }
-        if (selected >= entries.size()) selected = entries.isEmpty() ? 0 : entries.size() - 1;
+        if (remoteAll.isEmpty()) return;
+        int take = Math.min(REMOTE_PAGE, remoteAll.size() - remoteLoaded);
+        for (int i = 0; i < take; i++) {
+            Manifest.Version v = remoteAll.get(remoteLoaded + i);
+            if (v == null) continue;
+            if (entries.stream().anyMatch(e -> e.id.equals(v.id))) continue; // already installed
+            entries.add(new Entry(v.id, v.type, v.releaseTime, false, true));
+        }
+        remoteLoaded += take;
+    }
+
+    private boolean canLoadMore() {
+        return remoteAll != null && !remoteAll.isEmpty() && remoteLoaded < remoteAll.size();
+    }
+
+    private void move(Screen screen, int delta) {
+        List<Entry> v = visible();
+        if (v.isEmpty()) return;
+        if (delta > 0 && filter.isEmpty() && v.size() - selected <= LOAD_MARGIN && canLoadMore()) {
+            loadRemotePage();
+            v = visible();
+            if (v.isEmpty()) return;
+        }
+        selected = Math.floorMod(selected + delta, v.size());
+        int rows = screen.getTerminalSize().getRows();
+        int window = Math.max(1, rows - 8);
+        if (selected < scroll) scroll = selected;
+        else if (selected >= scroll + window) scroll = selected - window + 1;
     }
 
     private List<Entry> visible() {
@@ -215,10 +332,13 @@ public final class AuroraTui {
 
         int listTop = 4;
         int listBottom = rows - 4;
+        int window = Math.max(1, listBottom - listTop);
         List<Entry> v = visible();
-        for (int i = 0; i < listBottom - listTop && i < v.size(); i++) {
-            Entry e = v.get(i);
-            boolean sel = (i == Math.floorMod(selected, Math.max(1, v.size())));
+        int start = Math.min(scroll, Math.max(0, v.size() - window));
+        if (start < 0) start = 0;
+        for (int i = 0; i < Math.min(window, v.size()); i++) {
+            Entry e = v.get(start + i);
+            boolean sel = (start + i == selected);
             StringBuilder sb = new StringBuilder();
             sb.append(e.installed ? "[i] " : "[ ] ");
             sb.append(e.id);
@@ -231,6 +351,12 @@ public final class AuroraTui {
                 g.setBackgroundColor(TextColor.ANSI.DEFAULT);
             }
             g.putString(2, listTop + i, sb.toString());
+        }
+        // scroll hint
+        if (v.size() > start + window) {
+            g.setForegroundColor(TextColor.ANSI.YELLOW);
+            g.setBackgroundColor(TextColor.ANSI.DEFAULT);
+            g.putString(2, listBottom - 1, "\u25BC more \u2026 scroll down");
         }
 
         // Right pane: details

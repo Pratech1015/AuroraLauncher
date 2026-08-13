@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.Consumer;
 
 /**
  * The heart of AuroraLauncher: wires together the network/download layer,
@@ -155,6 +156,46 @@ public final class AuroraEngine {
         }
         System.err.println("  -> failed: " + result.error);
         return false;
+    }
+
+    /**
+     * Install a version, streaming every printed line (stdout/stderr, with ANSI
+     * color codes stripped) to {@code log}. Used by the TUI so install output can
+     * be shown in an overlay instead of hijacking the terminal.
+     */
+    boolean installVersion(String version, Consumer<String> log) throws Exception {
+        PrintStream pipe = new PrintStream(new LineCollector(log), true);
+        PrintStream oldOut = System.out, oldErr = System.err;
+        System.setOut(pipe);
+        System.setErr(pipe);
+        try {
+            return installVersion(version);
+        } finally {
+            System.setOut(oldOut);
+            System.setErr(oldErr);
+        }
+    }
+
+    /** Captures an OutputStream into lines handed to a Consumer, splitting on CR/LF and stripping ANSI. */
+    private static final class LineCollector extends OutputStream {
+        private final Consumer<String> sink;
+        private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        LineCollector(Consumer<String> sink) { this.sink = sink; }
+        @Override public void write(int b) throws IOException {
+            if (b == '\n' || b == '\r') { flushLine(); }
+            else buf.write(b);
+        }
+        @Override public void write(byte[] b, int off, int len) throws IOException {
+            for (int i = 0; i < len; i++) write(b[off + i]);
+        }
+        private void flushLine() {
+            String line = buf.toString(StandardCharsets.UTF_8);
+            buf.reset();
+            if (!line.isEmpty()) sink.accept(stripAnsi(line));
+        }
+        private static String stripAnsi(String s) {
+            return s.replaceAll("\u001B\\[[;0-9]*[A-Za-z]", "");
+        }
     }
 
     int launchVersion(String version, String[] javaArgs) throws Exception {
